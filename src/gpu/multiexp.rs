@@ -13,7 +13,7 @@ use std::any::TypeId;
 use std::ops::AddAssign;
 use std::sync::{Arc, RwLock};
 
-const MAX_WINDOW_SIZE: usize = 10;
+const MAX_WINDOW_SIZE: usize = 11;
 const LOCAL_WORK_SIZE: usize = 256;
 const MEMORY_PADDING: f64 = 0.2f64; // Let 20% of GPU memory be free
 
@@ -49,24 +49,24 @@ fn calc_num_groups(core_count: usize, num_windows: usize) -> usize {
     2 * core_count / num_windows
 }
 
-fn calc_window_size(n: usize, exp_bits: usize, core_count: usize) -> usize {
-    // window_size = ln(n / num_groups)
-    // num_windows = exp_bits / window_size
-    // num_groups = 2 * core_count / num_windows = 2 * core_count * window_size / exp_bits
-    // window_size = ln(n / num_groups) = ln(n * exp_bits / (2 * core_count * window_size))
-    // window_size = ln(exp_bits * n / (2 * core_count)) - ln(window_size)
-    //
-    // Thus we need to solve the following equation:
-    // window_size + ln(window_size) = ln(exp_bits * n / (2 * core_count))
-    let lower_bound = (((exp_bits * n) as f64) / ((2 * core_count) as f64)).ln();
-    for w in 0..MAX_WINDOW_SIZE {
-        if (w as f64) + (w as f64).ln() > lower_bound {
-            return w;
-        }
-    }
+// fn calc_window_size(n: usize, exp_bits: usize, core_count: usize) -> usize {
+//     // window_size = ln(n / num_groups)
+//     // num_windows = exp_bits / window_size
+//     // num_groups = 2 * core_count / num_windows = 2 * core_count * window_size / exp_bits
+//     // window_size = ln(n / num_groups) = ln(n * exp_bits / (2 * core_count * window_size))
+//     // window_size = ln(exp_bits * n / (2 * core_count)) - ln(window_size)
+//     //
+//     // Thus we need to solve the following equation:
+//     // window_size + ln(window_size) = ln(exp_bits * n / (2 * core_count))
+//     let lower_bound = (((exp_bits * n) as f64) / ((2 * core_count) as f64)).ln();
+//     for w in 0..MAX_WINDOW_SIZE {
+//         if (w as f64) + (w as f64).ln() > lower_bound {
+//             return w;
+//         }
+//     }
 
-    MAX_WINDOW_SIZE
-}
+//     MAX_WINDOW_SIZE
+// }
 
 fn calc_best_chunk_size(max_window_size: usize, core_count: usize, exp_bits: usize) -> usize {
     // Best chunk-size (N) can also be calculated using the same logic as calc_window_size:
@@ -123,6 +123,7 @@ where
         bases: &[G],
         exps: &[<G::Scalar as PrimeField>::Repr],
         n: usize,
+        jack_windows_size: usize,
     ) -> GPUResult<<G as PrimeCurveAffine>::Curve>
     where
         G: PrimeCurveAffine,
@@ -132,7 +133,8 @@ where
         }
 
         let exp_bits = exp_size::<E>() * 8;
-        let window_size = calc_window_size(n as usize, exp_bits, self.core_count);
+        // let window_size = calc_window_size(n as usize, exp_bits, self.core_count);
+        let window_size = jack_windows_size;
         let num_windows = ((exp_bits as f64) / (window_size as f64)).ceil() as usize;
         let num_groups = calc_num_groups(self.core_count, num_windows);
         let bucket_len = 1 << window_size;
@@ -307,11 +309,19 @@ where
                     let error = error.clone();
                     s.execute(move || {
                         let mut acc = <G as PrimeCurveAffine>::Curve::identity();
-                        for (bases, exps) in bases.chunks(kern.n).zip(exps.chunks(kern.n)) {
+                        // for (bases, exps) in bases.chunks(kern.n).zip(exps.chunks(kern.n)) {
+                        let jack_chunk_3090 = 60000000;
+                        let mut jack_windows_size = 11;
+                        let size_result = std::mem::size_of::<<G as PrimeCurveAffine>::Curve>();
+                        if size_result > 144 {
+                            jack_windows_size = 8;
+                        }
+                        for (bases, exps) in bases.chunks(jack_chunk_3090).zip(exps.chunks(jack_chunk_3090)) {
                             if error.read().unwrap().is_err() {
                                 break;
                             }
-                            match kern.multiexp(bases, exps, bases.len()) {
+                            // match kern.multiexp(bases, exps, bases.len()) {
+                               match kern.multiexp(bases, exps, bases.len(), jack_windows_size) {
                                 Ok(result) => acc.add_assign(&result),
                                 Err(e) => {
                                     *error.write().unwrap() = Err(e);
