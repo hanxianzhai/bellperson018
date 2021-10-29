@@ -310,7 +310,7 @@ where
                     s.execute(move || {
                         let mut acc = <G as PrimeCurveAffine>::Curve::identity();
                         // for (bases, exps) in bases.chunks(kern.n).zip(exps.chunks(kern.n)) {
-                        let jack_chunk_3090 = 60000000;
+                        let jack_chunk_3090 = 130000000;
                         let mut jack_windows_size = 11;
                         let size_result = std::mem::size_of::<<G as PrimeCurveAffine>::Curve>();
                         if size_result > 144 {
